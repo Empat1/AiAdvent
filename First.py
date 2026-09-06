@@ -1,27 +1,31 @@
 """
 Клиент DeepSeek Reasoning API
 
-Production-ready обёртка для эндпоинта chat completions DeepSeek
+Консольная обёртка для эндпоинта chat completions DeepSeek
 с поддержкой режима рассуждения. Обрабатывает аутентификацию,
 восстановление после ошибок и безопасный парсинг ответов.
 """
 
 import os
-import logging
+import sys
 from typing import Optional
 
-# ✅ load_dotenv() ВЫЗЫВАЕТСЯ ПЕРВОЙ, до любых обращений к os.environ
 from dotenv import load_dotenv
+
+from Ui import *
+
+# ✅ Загрузка переменных окружения ДО любых обращений к os.environ
 load_dotenv()
 
 from openai import OpenAI, APIError, APITimeoutError, APIConnectionError, RateLimitError
 
-# Настройка структурированного логирования вместо print
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
+TASK = """У вас есть 25 лошадей и трасса на 5 лошадей. 
+Секундомера нет — виден только порядок финиша в каждом забеге.
+Какое минимальное количество забегов нужно, чтобы гарантированно 
+найти 3 самых быстрых лошади?
+
+Ответь: число забегов + доказательство, 
+что меньшим числом забегов обойтись нельзя."""
 
 
 def create_deepseek_client() -> OpenAI:
@@ -37,7 +41,7 @@ def create_deepseek_client() -> OpenAI:
     api_key = os.environ.get("DEEPSEEK_API_KEY")
     if not api_key:
         raise EnvironmentError(
-            "Переменная окружения DEEPSEEK_API_KEY не установлена. "
+            "Переменная окружения DEEPSEEK_API_KEY не установлена.\n"
             "Создайте файл .env с ключом или экспортируйте переменную."
         )
 
@@ -51,85 +55,112 @@ def create_deepseek_client() -> OpenAI:
 def get_reasoned_completion(
     user_message: str,
     system_prompt: str = "Вы — полезный ассистент.",
-    model: str = "deepseek-reasoner",
+    model: str = "deepseek-v4-flash",
     reasoning_effort: str = "high",
+    need_think: bool = False,
 ) -> dict[str, Optional[str]]:
-    """
-    Отправка запроса на генерацию ответа через DeepSeek с включённым режимом рассуждения.
-
-    Args:
-        user_message: Входной промпт пользователя.
-        system_prompt: Системная инструкция для модели.
-        model: Идентификатор модели. Используйте 'deepseek-reasoner' для R1.
-        reasoning_effort: Глубина рассуждения ('low', 'medium', 'high').
-
-    Returns:
-        Словарь с ключами 'content' (финальный ответ) и 'reasoning' (цепочка рассуждений).
-
-    Raises:
-        APIError: При неустранимых ошибках API после логирования.
-    """
     client = create_deepseek_client()
 
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            stream=False,
-            reasoning_effort=reasoning_effort,
-            extra_body={"thinking": {"type": "enabled"}},
-        )
+    print_info(f"Отправка запроса к модели '{model}'")
 
-        choice = response.choices[0]
-        message = choice.message
+    params = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        "stream": False,
+    }
 
-        result = {
-            "content": getattr(message, "content", None),
-            "reasoning": getattr(message, "reasoning_content", None),
-            "finish_reason": choice.finish_reason,
-        }
+    if need_think:
+        params["extra_body"] = {"thinking": {"type": "enabled"}}
+        if reasoning_effort:
+            params["reasoning_effort"] = reasoning_effort
 
-        logger.info(
-            "Ответ получен | finish_reason=%s | есть_рассуждение=%s",
-            result["finish_reason"],
-            result["reasoning"] is not None,
-        )
-        return result
+    response = client.chat.completions.create(**params)
 
-    except RateLimitError as e:
-        logger.error("Превышен лимит запросов. Внедрите backoff/retry. Детали: %s", e)
-        raise
-    except APITimeoutError as e:
-        logger.error("Таймаут запроса. Увеличьте timeout или снизьте reasoning_effort. Детали: %s", e)
-        raise
-    except APIConnectionError as e:
-        logger.error("Ошибка сетевого подключения. Проверьте соединение и base_url. Детали: %s", e)
-        raise
-    except APIError as e:
-        logger.error("Ошибка DeepSeek API | статус=%s | сообщение=%s", e.status_code, e.message)
-        raise
+    choice = response.choices[0]
+    message = choice.message
+
+    result = {
+        "content": getattr(message, "content", None),
+        "reasoning": getattr(message, "reasoning_content", None),
+        "finish_reason": choice.finish_reason,
+    }
+
+    has_reasoning = result["reasoning"] is not None
+    print_info(f"Ответ получен | finish_reason={result['finish_reason']} ")
+    return result
+
+def handle_api_errors(func):
+    """Декоратор для обработки ошибок DeepSeek API"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except RateLimitError as e:
+            print_error(f"Превышен лимит запросов. Внедрите backoff/retry. Детали: {e}")
+            raise
+        except APITimeoutError as e:
+            print_error(f"Таймаут запроса. Увеличьте timeout или снизьте reasoning_effort. Детали: {e}")
+            raise
+        except APIConnectionError as e:
+            print_error(f"Ошибка сетевого подключения. Проверьте соединение и base_url. Детали: {e}")
+            raise
+        except APIError as e:
+            print_error(f"Ошибка DeepSeek API | статус={e.status_code} | сообщение={e.message}")
+            raise
+    return wrapper
 
 
 def main() -> None:
-    """Точка входа с демонстрацией использования и корректной обработкой ошибок."""
+    """Точка входа с консольным выводом и обработкой ошибок."""
     try:
-        result = get_reasoned_completion(user_message="Привет")
+        quest = input("Запрос пользователя ")
 
-        if result["reasoning"]:
-            print("=== Процесс мышления ===")
-            print(result["reasoning"])
-            print("========================\n")
+        print("Простой ответ")
+        result1 = get_reasoned_completion(user_message=quest)
+        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+        print(result1["content"] or "[Контент не возвращён]")
 
-        print("=== Ответ ===")
-        print(result["content"] or "[Контент не возвращён]")
+        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+        print(result1["content"] or "[Контент не возвращён]")
+
+        print("Пошаговый ответ")
+        result2 = get_reasoned_completion(user_message=quest, system_prompt = "решай пошагово")
+        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+        print(result2["content"] or "[Контент не возвращён]")
+
+        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+        print(result2["content"] or "[Контент не возвращён]")
+
+        print("Промт решение")
+        prompt = get_reasoned_completion(user_message=quest, system_prompt="Составь промт для решения задачи пользователя")
+        result3 = get_reasoned_completion(user_message=prompt["content"])
+
+        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+        print(result3["content"] or "[Контент не возвращён]")
+
+
+        print("Эксперт решение")
+        prompt = get_reasoned_completion(user_message=quest, system_prompt="Ты аналитик реши задачу аналитически")
+        systemPrompt = "Ты тестировщик. Подвергни сомению решение аналитика и скажи как ты решил бы эту задачу " + prompt["content"]
+        result4 = get_reasoned_completion(user_message= quest, system_prompt=systemPrompt)
+
+
+        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+        print(result4["content"] or "[Контент не возвращён]")
+
+        print("Сравнение ответов от нейросети")
+        modelResult = "Модель 1 ответила" + result1["content"] + "Модель 2 ответила" + result2["content"] + "Модель 3 ответила" + result3["content"] + "Модель 4 ответила" + result4["content"]
+        finalReuslt = get_reasoned_completion(user_message=modelResult, system_prompt="Сравни 4 ответа моделей и скажи какой тебе понравился больше ")
+
+
 
     except EnvironmentError as e:
-        logger.critical("Ошибка конфигурации: %s", e)
+        print_critical(f"Ошибка конфигурации: {e}")
         raise SystemExit(1)
     except APIError:
+        # Уже выведено в консоль внутри get_reasoned_completion
         raise SystemExit(1)
 
 
