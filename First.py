@@ -33,12 +33,21 @@ TASK = """У вас есть 25 лошадей и трасса на 5 лошад
 class ModelConfig:
     name: str
 
+@dataclass
+class Temperature:
+    temp: float
 
 MODELS = [
     ModelConfig("deepseek-v4-flash"),
     ModelConfig("deepseek-v4-pro"),
     ModelConfig("deepseek-chat"),
     ModelConfig("deepseek-reasoner"),
+]
+
+TEMPERATURE = [
+    Temperature(0.0),
+    Temperature(0.7),
+    Temperature(1.2),
 ]
 
 
@@ -72,6 +81,7 @@ def get_reasoned_completion(
     model: str = "deepseek-v4-flash",
     reasoning_effort: str = "high",
     need_think: bool = False,
+    temperature: float = 1.0,
 ) -> dict[str, Optional[str]]:
     client = create_deepseek_client()
 
@@ -83,6 +93,7 @@ def get_reasoned_completion(
             {"role": "user", "content": user_message},
         ],
         "stream": False,
+        "temperature": temperature,
     }
 
     if need_think:
@@ -101,38 +112,17 @@ def get_reasoned_completion(
         "finish_reason": choice.finish_reason,
     }
 
-    has_reasoning = result["reasoning"] is not None
     print_info(f"Ответ получен | finish_reason={result['finish_reason']} ")
     return result
-
-def handle_api_errors(func):
-    """Декоратор для обработки ошибок DeepSeek API"""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except RateLimitError as e:
-            print_error(f"Превышен лимит запросов. Внедрите backoff/retry. Детали: {e}")
-            raise
-        except APITimeoutError as e:
-            print_error(f"Таймаут запроса. Увеличьте timeout или снизьте reasoning_effort. Детали: {e}")
-            raise
-        except APIConnectionError as e:
-            print_error(f"Ошибка сетевого подключения. Проверьте соединение и base_url. Детали: {e}")
-            raise
-        except APIError as e:
-            print_error(f"Ошибка DeepSeek API | статус={e.status_code} | сообщение={e.message}")
-            raise
-    return wrapper
-
 
 def main() -> None:
     """Точка входа с консольным выводом и обработкой ошибок."""
     try:
         quest = input("Запрос пользователя ")
 
-        for model in MODELS:
+        for temperature in TEMPERATURE:
             start_time = time.perf_counter()
-            result1 = get_reasoned_completion(user_message=quest, model=model.name)
+            result1 = get_reasoned_completion(user_message=quest, temperature=temperature.temp)
             print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
             print(result1["content"] or "[Контент не возвращён]")
 
