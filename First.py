@@ -7,7 +7,9 @@
 """
 
 import os
-import sys
+import time
+
+from dataclasses import dataclass
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -26,6 +28,18 @@ TASK = """У вас есть 25 лошадей и трасса на 5 лошад
 
 Ответь: число забегов + доказательство, 
 что меньшим числом забегов обойтись нельзя."""
+
+@dataclass
+class ModelConfig:
+    name: str
+
+
+MODELS = [
+    ModelConfig("deepseek-v4-flash"),
+    ModelConfig("deepseek-v4-pro"),
+    ModelConfig("deepseek-chat"),
+    ModelConfig("deepseek-reasoner"),
+]
 
 
 def create_deepseek_client() -> OpenAI:
@@ -62,7 +76,6 @@ def get_reasoned_completion(
     client = create_deepseek_client()
 
     print_info(f"Отправка запроса к модели '{model}'")
-
     params = {
         "model": model,
         "messages": [
@@ -117,44 +130,17 @@ def main() -> None:
     try:
         quest = input("Запрос пользователя ")
 
-        print("Простой ответ")
-        result1 = get_reasoned_completion(user_message=quest)
-        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
-        print(result1["content"] or "[Контент не возвращён]")
+        for model in MODELS:
+            start_time = time.perf_counter()
+            result1 = get_reasoned_completion(user_message=quest, model=model.name)
+            print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+            print(result1["content"] or "[Контент не возвращён]")
 
-        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
-        print(result1["content"] or "[Контент не возвращён]")
+            elapsed = time.perf_counter() - start_time
 
-        print("Пошаговый ответ")
-        result2 = get_reasoned_completion(user_message=quest, system_prompt = "решай пошагово")
-        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
-        print(result2["content"] or "[Контент не возвращён]")
-
-        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
-        print(result2["content"] or "[Контент не возвращён]")
-
-        print("Промт решение")
-        prompt = get_reasoned_completion(user_message=quest, system_prompt="Составь промт для решения задачи пользователя")
-        result3 = get_reasoned_completion(user_message=prompt["content"])
-
-        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
-        print(result3["content"] or "[Контент не возвращён]")
-
-
-        print("Эксперт решение")
-        prompt = get_reasoned_completion(user_message=quest, system_prompt="Ты аналитик реши задачу аналитически")
-        systemPrompt = "Ты тестировщик. Подвергни сомению решение аналитика и скажи как ты решил бы эту задачу " + prompt["content"]
-        result4 = get_reasoned_completion(user_message= quest, system_prompt=systemPrompt)
-
-
-        print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
-        print(result4["content"] or "[Контент не возвращён]")
-
-        print("Сравнение ответов от нейросети")
-        modelResult = "Модель 1 ответила" + result1["content"] + "Модель 2 ответила" + result2["content"] + "Модель 3 ответила" + result3["content"] + "Модель 4 ответила" + result4["content"]
-        finalReuslt = get_reasoned_completion(user_message=modelResult, system_prompt="Сравни 4 ответа моделей и скажи какой тебе понравился больше ")
-
-
+            print(f"{Color.BOLD}=== Ответ ==={Color.RESET}")
+            print(result1["content"] or "[Контент не возвращён]")
+            print(f"Затраченное время = {elapsed}")
 
     except EnvironmentError as e:
         print_critical(f"Ошибка конфигурации: {e}")
