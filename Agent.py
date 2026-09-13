@@ -85,6 +85,45 @@ class DeepSeekAgent:
 
         return [system_msg] + history + [user_msg]
 
+    def compress_history_if_needed(self, trigger_threshold: int = 10, keep_last_n: int = 5) -> None:
+        """
+        Проверяет длину истории и сжимает её, если превышен порог.
+        """
+        to_compress, keep_raw = self.memory.get_compressible_history(keep_last_n=keep_last_n)
+
+        if not to_compress:
+            return  # Сжимать нечего
+
+        print_info(f"🔄 Превышен порог истории ({trigger_threshold}+). Запускаю сжатие контекста...")
+
+        # Форматируем текст для сжатия
+        text_to_summarize = "\n".join([f"{m['role']}: {m['content']}" for m in to_compress])
+
+        summary_prompt = (
+            "Сделай предельно краткое резюме этого фрагмента диалога. "
+            "Сохрани ВСЕ важные факты, имена, числа, договоренности и контекст. "
+            "Убери воду, приветствия и повторяющиеся мысли. "
+            "Максимум 3-4 предложения.\n\n"
+            f"Диалог:\n{text_to_summarize}"
+        )
+
+        try:
+            # 🔑 КЛЮЧЕВОЙ МОМЕНТ: используем ДЕШЁВУЮ модель для сжатия!
+            # Не тратьте дорогой reasoner на саммари.
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",  # или "deepseek-v4-flash"
+                messages=[{"role": "user", "content": summary_prompt}],
+                temperature=0.2,
+                max_tokens=512,
+                stream=False
+            )
+
+            new_summary = response.choices[0].message.content
+            self.memory.apply_summary(new_summary, keep_raw)
+
+        except Exception as e:
+            print_warning(f"Не удалось сжать историю: {e}. Продолжаю с полной историей.")
+
     def process_request(self, user_message: str) -> Dict[str, Optional[Any]]:
         messages = self._build_messages(user_message)
 

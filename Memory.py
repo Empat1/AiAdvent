@@ -60,3 +60,49 @@ class MemoryManager:
 
     def __len__(self) -> int:
         return len(self.history)
+
+    def get_compressible_history(self, keep_last_n: int = 5) -> tuple[list, list]:
+        """
+        Разделяет историю на две части:
+        1. Сообщения для сжатия (всё, кроме последних N)
+        2. Последние N сообщений (оставляем как есть)
+        """
+        history = self.get_history()
+        if len(history) <= keep_last_n:
+            return [], history
+
+        # Ищем, есть ли уже старое резюме, чтобы не потерять его
+        # Мы будем хранить резюме как сообщение с ролью "summary"
+        summary_msg = None
+        raw_history = []
+
+        for msg in history:
+            if msg.get("role") == "system":
+                summary_msg = msg
+            else:
+                raw_history.append(msg)
+
+        if len(raw_history) <= keep_last_n:
+            return [], history
+
+        to_compress = raw_history[:-keep_last_n]
+        keep_raw = raw_history[-keep_last_n:]
+
+        # Если было старое резюме, добавляем его в начало сжимаемого блока
+        if summary_msg:
+            to_compress = [summary_msg] + to_compress
+
+        return to_compress, keep_raw
+
+    def apply_summary(self, summary_text: str, recent_messages: list) -> None:
+        """
+        Заменяет старую историю на резюме + последние сообщения.
+        """
+        new_history = [
+            {"role": "system", "content": f"КРАТКОЕ РЕЗЮМЕ ПРЕДЫДУЩЕГО ДИАЛОГА:\n{summary_text}"}
+        ]
+        new_history.extend(recent_messages)
+
+        self.history = new_history
+        self._save()
+        print_info("🗜 История сжата. Старые сообщения заменены на резюме.")

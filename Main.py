@@ -27,17 +27,21 @@ def main() -> None:
             token_tracker=token_tracker,
         )
         print_info("🤖 Агент инициализирован. Память восстановлена.")
-        print(f"{Color.BOLD}Команды: 'выход', 'очистить', 'история', 'статистика'{Color.RESET}\n")
+        print(f"{Color.BOLD}Команды: 'сжать', 'выход', 'очистить', 'история', 'статистика'{Color.RESET}\n")
 
         while True:
+
             quest = input(f"{Color.BOLD}Вы: {Color.RESET}").strip()
 
             if not quest:
                 continue
-            if quest.lower() in ["выход", "exit", "quit"]:
-                print_info("Завершение работы агента.")
-                token_tracker.print_stats()  # Финальная статистика
-                break
+            if quest.lower() in ["сжать", "compress"]:
+                agent.compress_history_if_needed(trigger_threshold=0, keep_last_n=5)
+                continue
+
+            if quest.lower() in ["статистика", "stats"]:
+                token_tracker.print_stats()
+                continue
             if quest.lower() in ["очистить", "clear"]:
                 agent.clear_memory()
                 continue
