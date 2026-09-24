@@ -104,4 +104,4 @@
 
 Для запуска 
 pip3 install openai
-pip 3install tiktoken
+pip3 3install tiktoken
