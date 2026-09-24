@@ -100,3 +100,8 @@
 ## 📈 Графики
 
 ### Время ответа (секунды)
+
+
+Для запуска 
+pip3 install openai
+pip 3install tiktoken
